@@ -25,6 +25,7 @@
 #include <neural-graphics-primitives/shared_queue.h>
 #include <neural-graphics-primitives/thread_pool.h>
 #include <neural-graphics-primitives/trainable_buffer.cuh>
+#include <neural-graphics-primitives/NGPSequencer.h>
 
 #ifdef NGP_GUI
 #  include <neural-graphics-primitives/openxr_hmd.h>
@@ -938,7 +939,10 @@ public:
 		char mesh_path[MAX_PATH_LEN] = "base.obj";
 		char snapshot_path[MAX_PATH_LEN] = "base.ingp";
 		char video_path[MAX_PATH_LEN] = "video.mp4";
+		char next_sequence_path[MAX_PATH_LEN] = "";
+
 	} m_imgui;
+
 
 	fs::path m_root_dir = "";
 
@@ -951,6 +955,9 @@ public:
 
 	// CUDA stuff
 	tcnn::StreamAndEvent m_stream;
+
+	//sequencer stuff
+	NGPSequencer* m_sequencer = new NGPSequencer();
 
 	// Hashgrid encoding analysis
 	float m_quant_percent = 0.f;

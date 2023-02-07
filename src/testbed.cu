@@ -43,7 +43,7 @@
 #include <fstream>
 #include <set>
 #include <unordered_set>
-
+#include <format>
 #ifdef NGP_GUI
 #  include <imgui/imgui.h>
 #  include <imgui/backends/imgui_impl_glfw.h>
@@ -1385,6 +1385,27 @@ void Testbed::imgui() {
 		}
 		ImGui::Checkbox("Compress", &m_compress_snapshot);
 		if (!can_compress) ImGui::EndDisabled();
+	}
+
+	if(ImGui::CollapsingHeader("Sequencing Tools",ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		ImGui::Text("Sequencing Tools");
+		ImGui::Text("Sequence Time: %f",&m_sequencer->m_timer);
+		ImGui::InputText("File##Sequence File Path",m_imgui.next_sequence_path,sizeof(m_imgui.next_sequence_path));
+		ImGui::SameLine();
+		if(ImGui::Button("Trigger Sequence"))
+		{
+			load_file(m_imgui.next_sequence_path);
+			load_training_data(m_imgui.next_sequence_path);
+			load_network_config(m_imgui.next_sequence_path);
+			reload_training_data();
+
+			std::string snapshot_path = m_imgui.next_sequence_path;
+			snapshot_path.append("/base.ingp");
+
+			load_snapshot(snapshot_path);
+			m_sequencer->StartTimer();
+		}
 	}
 
 	if (m_testbed_mode == ETestbedMode::Nerf || m_testbed_mode == ETestbedMode::Sdf) {
@@ -3142,6 +3163,11 @@ bool Testbed::frame() {
 		skip_rendering = false;
 	}
 
+	if(m_sequencer->isTimerRunning)
+	{
+		m_sequencer->IncrementTimer();
+	}
+
 #ifdef NGP_GUI
 	if (m_hmd && m_hmd->is_visible()) {
 		skip_rendering = false;
@@ -4666,5 +4692,10 @@ void Testbed::set_loop_animation(bool value) {
 	m_camera_path.loop = value;
 }
 
+
+
 NGP_NAMESPACE_END
+
+
+
 
