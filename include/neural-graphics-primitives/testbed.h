@@ -25,7 +25,6 @@
 #include <neural-graphics-primitives/shared_queue.h>
 #include <neural-graphics-primitives/thread_pool.h>
 #include <neural-graphics-primitives/trainable_buffer.cuh>
-#include <neural-graphics-primitives/NGPSequencer.h>
 
 #ifdef NGP_GUI
 #  include <neural-graphics-primitives/openxr_hmd.h>
@@ -368,6 +367,9 @@ public:
 	}
 	bool reprojection_available() { return m_dlss; }
 	static ELossType string_to_loss_type(const std::string& str);
+
+	Eigen::Matrix<float,3,4> get_camera_transform_nerf_space();
+
 	void reset_network(bool clear_density_grid = true);
 	void create_empty_nerf_dataset(size_t n_images, int aabb_scale = 1, bool is_hdr = false);
 	void load_nerf(const fs::path& data_path);
@@ -956,8 +958,6 @@ public:
 	// CUDA stuff
 	tcnn::StreamAndEvent m_stream;
 
-	//sequencer stuff
-	NGPSequencer* m_sequencer = new NGPSequencer();
 
 	// Hashgrid encoding analysis
 	float m_quant_percent = 0.f;

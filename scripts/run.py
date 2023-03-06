@@ -17,6 +17,8 @@ import numpy as np
 import shutil
 import time
 
+import ngp_sequencer
+
 from common import *
 from scenes import *
 
@@ -68,6 +70,7 @@ def parse_args():
 
 	parser.add_argument("--sharpen", default=0, help="Set amount of sharpening applied to NeRF training images. Range 0.0 to 1.0.")
 
+	parser.add_argument("--run_sequencer",default=False,help="Sets whether the sequencer will run on this execution.")
 
 	return parser.parse_args()
 
@@ -177,10 +180,24 @@ if __name__ == "__main__":
 	if n_steps < 0 and (not args.load_snapshot or args.gui):
 		n_steps = 35000
 
+	if args.run_sequencer:
+		sequencer = ngp_sequencer.Sequencer()
+		#sequencer.AddLambdaCommand(testbed.set_camera_whatever)
+		sequencer.AddWaitCommand(4)
+		sequencer.AddSceneTransitionCommand("C:\\Users\\mike_\\Documents\\CodeProjects\\instant-ngp-MEML\\data\\nerf\\garden_8")
+		sequencer.AddWaitCommand(8)
+		sequencer.AddSceneTransitionCommand("C:\\Users\\mike_\\Documents\\CodeProjects\\instant-ngp-MEML\\data\\nerf\\fox")
+
+
 	tqdm_last_update = 0
 	if n_steps > 0:
 		with tqdm(desc="Training", total=n_steps, unit="step") as t:
+			#render loop
 			while testbed.frame():
+
+				if args.run_sequencer:
+					sequencer.Tick(testbed)
+
 				if testbed.want_repl():
 					repl(testbed)
 				# What will happen when training is done?
@@ -196,11 +213,17 @@ if __name__ == "__main__":
 					t.reset()
 
 				now = time.monotonic()
+				if args.run_sequencer and not sequencer.isCompleted:
+					sequencer.isStarted = True
+
 				if now - tqdm_last_update > 0.1:
 					t.update(testbed.training_step - old_training_step)
 					t.set_postfix(loss=testbed.loss)
 					old_training_step = testbed.training_step
 					tqdm_last_update = now
+
+				if(testbed.is_ctrl_down()):
+					print("\nCamara Matrix: " + str(testbed.get_camera_transform_nerf_space()))
 
 	if args.save_snapshot:
 		testbed.save_snapshot(args.save_snapshot, False)

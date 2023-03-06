@@ -593,6 +593,13 @@ Eigen::Matrix<float, 3, 4> Testbed::crop_box(bool nerf_space) const {
 	return rv;
 }
 
+Eigen::Matrix<float, 3, 4> Testbed::get_camera_transform_nerf_space()
+{
+	return m_nerf.training.dataset.ngp_matrix_to_nerf(
+		m_camera);
+}
+
+
 void Testbed::set_crop_box(Eigen::Matrix<float, 3, 4> m, bool nerf_space) {
 	if (nerf_space) {
 		m = m_nerf.training.dataset.nerf_matrix_to_ngp(m, true);
@@ -1387,26 +1394,6 @@ void Testbed::imgui() {
 		if (!can_compress) ImGui::EndDisabled();
 	}
 
-	if(ImGui::CollapsingHeader("Sequencing Tools",ImGuiTreeNodeFlags_DefaultOpen))
-	{
-		ImGui::Text("Sequencing Tools");
-		ImGui::Text("Sequence Time: %f",&m_sequencer->m_timer);
-		ImGui::InputText("File##Sequence File Path",m_imgui.next_sequence_path,sizeof(m_imgui.next_sequence_path));
-		ImGui::SameLine();
-		if(ImGui::Button("Trigger Sequence"))
-		{
-			load_file(m_imgui.next_sequence_path);
-			load_training_data(m_imgui.next_sequence_path);
-			load_network_config(m_imgui.next_sequence_path);
-			reload_training_data();
-
-			std::string snapshot_path = m_imgui.next_sequence_path;
-			snapshot_path.append("/base.ingp");
-
-			load_snapshot(snapshot_path);
-			m_sequencer->StartTimer();
-		}
-	}
 
 	if (m_testbed_mode == ETestbedMode::Nerf || m_testbed_mode == ETestbedMode::Sdf) {
 		if (ImGui::CollapsingHeader("Export mesh / volume / slices")) {
@@ -3163,10 +3150,6 @@ bool Testbed::frame() {
 		skip_rendering = false;
 	}
 
-	if(m_sequencer->isTimerRunning)
-	{
-		m_sequencer->IncrementTimer();
-	}
 
 #ifdef NGP_GUI
 	if (m_hmd && m_hmd->is_visible()) {
