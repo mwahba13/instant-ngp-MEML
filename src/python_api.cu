@@ -480,6 +480,7 @@ PYBIND11_MODULE(pyngp, m) {
 		.def_readwrite("screen_center", &Testbed::m_screen_center)
 		.def_readwrite("training_batch_size", &Testbed::m_training_batch_size)
 		.def("set_nerf_camera_matrix", &Testbed::set_nerf_camera_matrix)
+		.def("set_camera_position_from_nerf_space",&Testbed::set_camera_position_from_nerf_space)
 		.def("set_camera_to_training_view", &Testbed::set_camera_to_training_view)
 		.def("get_camera_transform_nerf_space",&Testbed::get_camera_transform_nerf_space)
 		.def("first_training_view", &Testbed::first_training_view)

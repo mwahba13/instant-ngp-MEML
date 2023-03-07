@@ -393,6 +393,15 @@ void Testbed::set_nerf_camera_matrix(const Matrix<float, 3, 4>& cam) {
 	m_camera = m_nerf.training.dataset.nerf_matrix_to_ngp(cam);
 }
 
+void Testbed::set_camera_position_from_nerf_space(const Eigen::Vector3f& pos)
+{
+
+
+	m_camera.col(3) = m_nerf.training.dataset.nerf_position_to_ngp(pos);
+	reset_accumulation(true);
+}
+
+
 Vector3f Testbed::look_at() const {
 	return view_pos() + view_dir() * m_scale;
 }
@@ -598,6 +607,7 @@ Eigen::Matrix<float, 3, 4> Testbed::get_camera_transform_nerf_space()
 	return m_nerf.training.dataset.ngp_matrix_to_nerf(
 		m_camera);
 }
+
 
 
 void Testbed::set_crop_box(Eigen::Matrix<float, 3, 4> m, bool nerf_space) {
@@ -1302,6 +1312,7 @@ void Testbed::imgui() {
 			Vector3f s = m_sun_dir;
 			Vector3f u = m_up_dir;
 			Array4f b = m_background_color;
+			Eigen::Matrix<float,3,4> cam_matrix_nerf_space = m_nerf.training.dataset.ngp_matrix_to_nerf(m_camera);
 			snprintf(buf, sizeof(buf),
 				"testbed.background_color = [%0.3f, %0.3f, %0.3f, %0.3f]\n"
 				"testbed.exposure = %0.3f\n"
@@ -1309,6 +1320,7 @@ void Testbed::imgui() {
 				"testbed.up_dir = [%0.3f,%0.3f,%0.3f]\n"
 				"testbed.view_dir = [%0.3f,%0.3f,%0.3f]\n"
 				"testbed.look_at = [%0.3f,%0.3f,%0.3f]\n"
+				"Nerf Space Camera View Matrix = \n[%0.3f,%0.3f,%0.3f,%0.3f]\n[%0.3f,%0.3f,%0.3f,%0.3f]\n[%0.3f,%0.3f,%0.3f,%0.3f]\n"
 				"testbed.scale = %0.3f\n"
 				"testbed.fov,testbed.aperture_size,testbed.slice_plane_z = %0.3f,%0.3f,%0.3f\n"
 				"testbed.autofocus_target = [%0.3f,%0.3f,%0.3f]\n"
@@ -1318,7 +1330,10 @@ void Testbed::imgui() {
 				, s.x(), s.y(), s.z()
 				, u.x(), u.y(), u.z()
 				, v.x(), v.y(), v.z()
-				, p.x(), p.y(), p.z()
+				, p.x(), p.y(), p.z(),
+				cam_matrix_nerf_space(0,0),cam_matrix_nerf_space(0,1),cam_matrix_nerf_space(0,2),cam_matrix_nerf_space(0,3),
+				cam_matrix_nerf_space(1,0),cam_matrix_nerf_space(1,1),cam_matrix_nerf_space(1,2),cam_matrix_nerf_space(1,3),
+				cam_matrix_nerf_space(2,0),cam_matrix_nerf_space(2,1),cam_matrix_nerf_space(2,2),cam_matrix_nerf_space(2,3)
 				, scale()
 				, fov(), m_aperture_size, m_slice_plane_z
 				, m_autofocus_target.x(), m_autofocus_target.y(), m_autofocus_target.z()

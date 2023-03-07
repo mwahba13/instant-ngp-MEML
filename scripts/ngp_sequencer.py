@@ -1,6 +1,26 @@
 import time
 import os
+import numpy as np
 from collections import deque
+class SequenceCommand:
+    def ExecuteCommand(self,testbed,sequencer):
+        return True
+
+class CameraMovementCommand(SequenceCommand):
+    def __init__(self,posA:np.array,posB:np.array,t:float,startTime):
+        self.posA = posA
+        self.posB = posB
+        self.startTime = startTime
+        self.t = t
+        print("\nstarttime cam move command: " + str(startTime))
+        self.endTime = float(startTime) + t
+        print("\nendTime cam move command: " + str(self.endTime))
+        self.isComplete = False
+
+    def ExecuteCommand(self, testbed, sequencer):
+        print("\nExecute Command")
+        sequencer._AddCameraMovementCommand(self)
+        return True
 
 class Sequencer:
     def __init__(self):
@@ -10,6 +30,8 @@ class Sequencer:
         self.currentTime = 0.0
         self.currentCommand = SequenceCommand()
         self.commandQueue = deque()
+        self.cameraMovementCommand = None
+        self.cameraMovementCommandQueue = deque()
 
     def StartSequencer(self):
         self.isStarted = True
@@ -20,11 +42,25 @@ class Sequencer:
         if(self.isStarted and not self.isCompleted):
             self.currentTime = time.perf_counter() - self.startTime
             if(self.currentCommand.ExecuteCommand(testbed,self)):
+                if(type(self.currentCommand) is CameraMovementCommand):
+                    self.currentCommand = SequenceCommand()
                 if(len(self.commandQueue) > 0):
                     self.currentCommand = self.commandQueue.popleft()
-                else:
-                    print("Completed queue")
+                elif(len(self.cameraMovementCommandQueue) <= 0 
+                     and self.cameraMovementCommand == None):
+                    print("\nCompleted queue")
                     self.isCompleted = True
+                    
+        
+            if(self.cameraMovementCommand != None):
+                self.cameraMovementCommand.ExecuteCommand(testbed,self)
+                if(self.cameraMovementCommand.isComplete):
+                    if(len(self.cameraMovementCommandQueue) >0):
+                        self.cameraMovementCommand = self.cameraMovementCommandQueue.popleft()
+                    else:
+                        self.cameraMovementCommand = None
+
+                    
         else:
             return 
 
@@ -42,13 +78,44 @@ class Sequencer:
 
     def AddSetSceneScaleCommand(self,scale:float):
         self.commandQueue.append(SetSceneScaleCommand(scale))
+
+    #moves camera from posA to posB (in nerf space) over t seconds
+    def AddCameraMovementCommand(self,posA:np.array,posB:np.array,t:float):
+        self.commandQueue.append(CameraMovementCommand(posA,posB,t,self.currentTime))
+
+    #internal - do not use
+    def _AddCameraMovementCommand(self,_camMoveCommand):
+        if(len(self.cameraMovementCommandQueue) != 0):
+            self.cameraMovementCommandQueue.append(_CameraMovementCommand(
+                _camMoveCommand.posA,_camMoveCommand.posB,_camMoveCommand.t,self.currentTime))
+        else:
+            self.cameraMovementCommand = _CameraMovementCommand(
+                _camMoveCommand.posA,_camMoveCommand.posB,_camMoveCommand.t,self.currentTime)
+    
     
     def AddLambdaCommand(self,func:callable):
         self.commandQueue.append(LambdaCommand(func))
 
-class SequenceCommand:
-    def ExecuteCommand(self,testbed,sequencer):
-        return True
+
+#internal - do not use
+class _CameraMovementCommand(SequenceCommand):
+    def __init__(self,posA:np.array,posB:np.array,t:float,startTime):
+        self.posA = posA
+        self.posB = posB
+        self.startTime = startTime
+        self.endTime = float(startTime) + t
+        print("\nendTime: " + str(self.endTime))
+        self.isComplete = False
+
+    #sets camera at current interpolated position
+    def ExecuteCommand(self, testbed, sequencer):
+        t = float(sequencer.currentTime) / float(self.endTime)
+        if(t >= 1.0):
+            t = 1.0
+            self.isComplete = True
+        interpVec = (1 - t)*self.posA + t*self.posB
+        testbed.set_camera_position_from_nerf_space(interpVec)
+        
 
 
 class WaitCommand(SequenceCommand):

@@ -11,7 +11,6 @@
 import argparse
 import os
 import commentjson as json
-
 import numpy as np
 
 import shutil
@@ -180,24 +179,28 @@ if __name__ == "__main__":
 	if n_steps < 0 and (not args.load_snapshot or args.gui):
 		n_steps = 35000
 
+
 	if args.run_sequencer:
 		sequencer = ngp_sequencer.Sequencer()
-		#sequencer.AddLambdaCommand(testbed.set_camera_whatever)
-		sequencer.AddWaitCommand(4)
-		sequencer.AddSceneTransitionCommand("C:\\Users\\mike_\\Documents\\CodeProjects\\instant-ngp-MEML\\data\\nerf\\garden_8")
-		sequencer.AddWaitCommand(8)
-		sequencer.AddSceneTransitionCommand("C:\\Users\\mike_\\Documents\\CodeProjects\\instant-ngp-MEML\\data\\nerf\\fox")
-
+		sequencer.AddWaitCommand(5)
+		
+		sequencer.AddCameraMovementCommand(
+			np.array([1.3897,-9.6204,-5.02297]),
+			np.array([4.8787,-4.11331,-1.35435]),
+			10
+		)
+		
 
 	tqdm_last_update = 0
 	if n_steps > 0:
 		with tqdm(desc="Training", total=n_steps, unit="step") as t:
 			#render loop
 			while testbed.frame():
-
+				
+				
 				if args.run_sequencer:
 					sequencer.Tick(testbed)
-
+				
 				if testbed.want_repl():
 					repl(testbed)
 				# What will happen when training is done?
@@ -223,6 +226,7 @@ if __name__ == "__main__":
 					tqdm_last_update = now
 
 				if(testbed.is_ctrl_down()):
+					testbed.set_camera_position_from_nerf_space(np.array([1.3897,-9.6204,-5.02297]))
 					print("\nCamara Matrix: " + str(testbed.get_camera_transform_nerf_space()))
 
 	if args.save_snapshot:
