@@ -395,7 +395,18 @@ void Testbed::set_nerf_camera_matrix(const mat4x3& cam) {
 	m_camera = m_nerf.training.dataset.nerf_matrix_to_ngp(cam);
 }
 
-vec3 Testbed::look_at() const {
+
+void Testbed::set_camera_position_from_nerf_space(const Eigen::Vector3f& pos)
+{
+
+
+	m_camera.col(3) = m_nerf.training.dataset.nerf_position_to_ngp(pos);
+	reset_accumulation(true);
+}
+
+
+Vector3f Testbed::look_at() const {
+
 	return view_pos() + view_dir() * m_scale;
 }
 
@@ -600,7 +611,17 @@ mat4x3 Testbed::crop_box(bool nerf_space) const {
 	return rv;
 }
 
-void Testbed::set_crop_box(mat4x3 m, bool nerf_space) {
+
+Eigen::Matrix<float, 3, 4> Testbed::get_camera_transform_nerf_space()
+{
+	return m_nerf.training.dataset.ngp_matrix_to_nerf(
+		m_camera);
+}
+
+
+
+void Testbed::set_crop_box(Eigen::Matrix<float, 3, 4> m, bool nerf_space) {
+
 	if (nerf_space) {
 		m = m_nerf.training.dataset.nerf_matrix_to_ngp(m, true);
 	}
@@ -1064,6 +1085,7 @@ void Testbed::imgui() {
 					ImGui::Checkbox("Multi-GPU rendering (one per eye)", &m_use_aux_devices);
 				}
 
+
 				accum_reset |= ImGui::Checkbox("Depth-based reprojection", &m_vr_use_depth_reproject);
 				if (ImGui::Checkbox("Mask hidden display areas", &m_vr_use_hidden_area_mask)) {
 					accum_reset = true;
@@ -1088,6 +1110,7 @@ void Testbed::imgui() {
 						accum_reset |= ImGui::SliderFloat("Fovea diameter", &m_foveated_rendering_full_res_diameter, 0.1f, 0.9f) && !m_dlss;
 					}
 				}
+
 				ImGui::TreePop();
 			}
 		}
@@ -1458,11 +1481,14 @@ void Testbed::imgui() {
 			accum_reset |= ImGui::SliderFloat("Slice / focus depth", &m_slice_plane_z, -m_bounding_radius, m_bounding_radius);
 			accum_reset |= ImGui::SliderFloat("Render near distance", &m_render_near_distance, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_NoRoundToFormat);
 			char buf[2048];
-			vec3 v = view_dir();
-			vec3 p = look_at();
-			vec3 s = m_sun_dir;
-			vec3 u = m_up_dir;
-			vec4 b = m_background_color;
+
+			Vector3f v = view_dir();
+			Vector3f p = look_at();
+			Vector3f s = m_sun_dir;
+			Vector3f u = m_up_dir;
+			Array4f b = m_background_color;
+			Eigen::Matrix<float,3,4> cam_matrix_nerf_space = m_nerf.training.dataset.ngp_matrix_to_nerf(m_camera);
+
 			snprintf(buf, sizeof(buf),
 				"testbed.background_color = [%0.3f, %0.3f, %0.3f, %0.3f]\n"
 				"testbed.exposure = %0.3f\n"
@@ -1470,16 +1496,22 @@ void Testbed::imgui() {
 				"testbed.up_dir = [%0.3f,%0.3f,%0.3f]\n"
 				"testbed.view_dir = [%0.3f,%0.3f,%0.3f]\n"
 				"testbed.look_at = [%0.3f,%0.3f,%0.3f]\n"
+				"Nerf Space Camera View Matrix = \n[%0.3f,%0.3f,%0.3f,%0.3f]\n[%0.3f,%0.3f,%0.3f,%0.3f]\n[%0.3f,%0.3f,%0.3f,%0.3f]\n"
 				"testbed.scale = %0.3f\n"
 				"testbed.fov,testbed.aperture_size,testbed.slice_plane_z = %0.3f,%0.3f,%0.3f\n"
 				"testbed.autofocus_target = [%0.3f,%0.3f,%0.3f]\n"
 				"testbed.autofocus = %s\n\n"
 				, b.r, b.g, b.b, b.a
 				, m_exposure
-				, s.x, s.y, s.z
-				, u.x, u.y, u.z
-				, v.x, v.y, v.z
-				, p.x, p.y, p.z
+
+				, s.x(), s.y(), s.z()
+				, u.x(), u.y(), u.z()
+				, v.x(), v.y(), v.z()
+				, p.x(), p.y(), p.z(),
+				cam_matrix_nerf_space(0,0),cam_matrix_nerf_space(0,1),cam_matrix_nerf_space(0,2),cam_matrix_nerf_space(0,3),
+				cam_matrix_nerf_space(1,0),cam_matrix_nerf_space(1,1),cam_matrix_nerf_space(1,2),cam_matrix_nerf_space(1,3),
+				cam_matrix_nerf_space(2,0),cam_matrix_nerf_space(2,1),cam_matrix_nerf_space(2,2),cam_matrix_nerf_space(2,3)
+
 				, scale()
 				, fov(), m_aperture_size, m_slice_plane_z
 				, m_autofocus_target.x, m_autofocus_target.y, m_autofocus_target.z
@@ -1560,26 +1592,6 @@ void Testbed::imgui() {
 		if (!can_compress) ImGui::EndDisabled();
 	}
 
-	if(ImGui::CollapsingHeader("Sequencing Tools",ImGuiTreeNodeFlags_DefaultOpen))
-	{
-		ImGui::Text("Sequencing Tools");
-		ImGui::Text("Sequence Time: %f",&m_sequencer->m_timer);
-		ImGui::InputText("File##Sequence File Path",m_imgui.next_sequence_path,sizeof(m_imgui.next_sequence_path));
-		ImGui::SameLine();
-		if(ImGui::Button("Trigger Sequence"))
-		{
-			load_file(m_imgui.next_sequence_path);
-			load_training_data(m_imgui.next_sequence_path);
-			load_network_config(m_imgui.next_sequence_path);
-			reload_training_data();
-
-			std::string snapshot_path = m_imgui.next_sequence_path;
-			snapshot_path.append("/base.ingp");
-
-			load_snapshot(snapshot_path);
-			m_sequencer->StartTimer();
-		}
-	}
 
 	if (m_testbed_mode == ETestbedMode::Nerf || m_testbed_mode == ETestbedMode::Sdf) {
 		if (ImGui::CollapsingHeader("Export mesh / volume / slices")) {
@@ -3372,10 +3384,6 @@ bool Testbed::frame() {
 		skip_rendering = false;
 	}
 
-	if(m_sequencer->isTimerRunning)
-	{
-		m_sequencer->IncrementTimer();
-	}
 
 #ifdef NGP_GUI
 	if (m_hmd && m_hmd->is_visible()) {
@@ -3439,7 +3447,9 @@ bool Testbed::frame() {
 		// Far and near planes are intentionally reversed, because we map depth inversely
 		// to z. I.e. a window-space depth of 1 refers to the near plane and a depth of 0
 		// to the far plane. This results in much better numeric precision.
+
 		m_hmd->end_frame(m_vr_frame_info, m_ndc_zfar / m_scale, m_ndc_znear / m_scale, m_vr_use_depth_reproject);
+
 	}
 #endif
 
