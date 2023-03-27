@@ -179,16 +179,13 @@ if __name__ == "__main__":
 	if n_steps < 0 and (not args.load_snapshot or args.gui):
 		n_steps = 35000
 
-
+#ADD COMMANDS HERE-------
 	if args.run_sequencer:
 		sequencer = ngp_sequencer.Sequencer()
-		sequencer.AddWaitCommand(5)
-		
-		sequencer.AddCameraMovementCommand(
-			np.array([1.3897,-9.6204,-5.02297]),
-			np.array([4.8787,-4.11331,-1.35435]),
-			10
-		)
+		#examples of commands below
+		#sequencer.AddSceneTransitionCommand("C://PATH_TO_NERF_FOLDER)
+		#sequencer.AddWaitCommand(5)
+		#sequencer.AddCameraMovementCommand(np.array([1.3897,-9.6204,-5.02297]),np.array([4.8787,-4.11331,-1.35435]),10)
 		
 
 	tqdm_last_update = 0
