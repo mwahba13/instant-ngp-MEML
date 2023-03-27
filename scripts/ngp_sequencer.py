@@ -68,19 +68,43 @@ class Sequencer:
 
     #todo - fix bug with time not being cumulative
     def AddWaitCommand(self,time:float):
-        """Adds a command that halts execution until defined time has passed (in seconds)"""
+        """Adds a command that halts execution until defined time has passed (in seconds).
+        
+        Args:
+        time - time in seconds to wait before executing next command in queue.
+        """
         print("\nAdd Wait Command")
         self.commandQueue.append(WaitCommand(time))
 
     def AddSceneTransitionCommand(self,scene:str):
+        """Transitions to next scene. Will load snapshot if one is present.
+        
+        Args:
+        scene - path to nerf snapshot/photos you want to transition to.
+        """
         print("\nAdd Scene Transition Command")
         self.commandQueue.append(SceneTransitionCommand(scene))
 
+
     def AddSetSceneScaleCommand(self,scale:float):
+        """Sets the scale of the scene. May not work.
+        
+        Args:
+        scale - scale factor to set the scene to.
+        """
         self.commandQueue.append(SetSceneScaleCommand(scale))
 
     #moves camera from posA to posB (in nerf space) over t seconds
     def AddCameraMovementCommand(self,posA:np.array,posB:np.array,t:float):
+        """Moves the camera from position A to position B in a straight line over t seconds. Note that 
+        the camera position is represented in NERF space.
+        
+        Args:
+        posA - Starting position of camera.
+        posB - Ending position of camera.
+        t - time in seconds for how long to interpolate from posA to posB
+        """
+
         self.commandQueue.append(CameraMovementCommand(posA,posB,t,self.currentTime))
 
     #internal - do not use
