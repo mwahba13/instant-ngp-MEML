@@ -1,3 +1,9 @@
+# Running the Sequencer
+You can run the sequencer by adding the `--run_sequencer True` flag to your execution of the run.py script.
+
+```
+python scripts/run.py --scene PATH_TO_SCENE --run_sequencer True --train 
+```
 # Instant Neural Graphics Primitives ![](https://github.com/NVlabs/instant-ngp/workflows/CI/badge.svg)
 
 <img src="docs/assets_readme/fox.gif" height="342"/> <img src="docs/assets_readme/robot5.gif" height="342"/>
