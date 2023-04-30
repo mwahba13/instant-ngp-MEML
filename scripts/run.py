@@ -8,6 +8,8 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
+IS_AUDIO_PLAYING = False
+
 import argparse
 import os
 import commentjson as json
@@ -17,11 +19,15 @@ import shutil
 import time
 
 import ngp_sequencer
+import pydub
+from pydub.playback import _play_with_simpleaudio
+
 
 from common import *
 from scenes import *
 
 from tqdm import tqdm
+
 
 import pyngp as ngp # noqa
 
@@ -182,14 +188,10 @@ if __name__ == "__main__":
 
 	if args.run_sequencer:
 		sequencer = ngp_sequencer.Sequencer()
-		sequencer.AddWaitCommand(5)
-		
-		sequencer.AddCameraMovementCommand(
-			np.array([1.3897,-9.6204,-5.02297]),
-			np.array([4.8787,-4.11331,-1.35435]),
-			10
-		)
-		
+		#PUT SEQUENCER COMMANDS HERE
+
+	#PUT PATH TO AUDIO TRACK HERE
+	sound = pydub.AudioSegment.from_file("ghostsong.wav",format="wav")
 
 	tqdm_last_update = 0
 	if n_steps > 0:
@@ -201,6 +203,10 @@ if __name__ == "__main__":
 				if args.run_sequencer:
 					sequencer.Tick(testbed)
 				
+				if (not IS_AUDIO_PLAYING):
+					_play_with_simpleaudio(sound)
+					IS_AUDIO_PLAYING = True
+
 				if testbed.want_repl():
 					repl(testbed)
 				# What will happen when training is done?
