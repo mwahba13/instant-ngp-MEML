@@ -47,10 +47,10 @@ static_assert(false, "DLSS can only be compiled when both Vulkan and GUI support
 #include <nvsdk_ngx_helpers.h>
 #include <nvsdk_ngx_helpers_vk.h>
 
+#include <atomic>
 #include <codecvt>
 #include <locale>
 
-using namespace Eigen;
 using namespace tcnn;
 
 NGP_NAMESPACE_BEGIN
@@ -102,6 +102,62 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL vk_debug_callback(
 	return VK_FALSE;
 }
 
+std::set<std::string> vk_supported_instance_layers() {
+	uint32_t count = 0;
+	VK_CHECK_THROW(vkEnumerateInstanceLayerProperties(&count, nullptr));
+	std::vector<VkLayerProperties> layer_properties(count);
+	VK_CHECK_THROW(vkEnumerateInstanceLayerProperties(&count, layer_properties.data()));
+
+	std::set<std::string> layers;
+	for (auto& l : layer_properties) {
+		layers.insert(l.layerName);
+	}
+
+	return layers;
+}
+
+std::set<std::string> vk_supported_device_layers(VkPhysicalDevice device) {
+	uint32_t count = 0;
+	VK_CHECK_THROW(vkEnumerateDeviceLayerProperties(device, &count, nullptr));
+	std::vector<VkLayerProperties> layer_properties(count);
+	VK_CHECK_THROW(vkEnumerateDeviceLayerProperties(device, &count, layer_properties.data()));
+
+	std::set<std::string> layers;
+	for (auto& l : layer_properties) {
+		layers.insert(l.layerName);
+	}
+
+	return layers;
+}
+
+std::set<std::string> vk_supported_instance_extensions(const char* layer_name) {
+	uint32_t count = 0;
+	VK_CHECK_THROW(vkEnumerateInstanceExtensionProperties(layer_name, &count, nullptr));
+	std::vector<VkExtensionProperties> extension_properties(count);
+	VK_CHECK_THROW(vkEnumerateInstanceExtensionProperties(layer_name, &count, extension_properties.data()));
+
+	std::set<std::string> extensions;
+	for (auto& e : extension_properties) {
+		extensions.insert(e.extensionName);
+	}
+
+	return extensions;
+}
+
+std::set<std::string> vk_supported_device_extensions(VkPhysicalDevice device, const char* layer_name) {
+	uint32_t count = 0;
+	VK_CHECK_THROW(vkEnumerateDeviceExtensionProperties(device, layer_name, &count, nullptr));
+	std::vector<VkExtensionProperties> extension_properties(count);
+	VK_CHECK_THROW(vkEnumerateDeviceExtensionProperties(device, layer_name, &count, extension_properties.data()));
+
+	std::set<std::string> extensions;
+	for (auto& e : extension_properties) {
+		extensions.insert(e.extensionName);
+	}
+
+	return extensions;
+}
+
 class VulkanAndNgx : public IDlssProvider, public std::enable_shared_from_this<VulkanAndNgx> {
 public:
 	VulkanAndNgx() {
@@ -126,32 +182,6 @@ public:
 		instance_create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 		instance_create_info.pApplicationInfo = &app_info;
 
-		uint32_t available_layer_count;
-		vkEnumerateInstanceLayerProperties(&available_layer_count, nullptr);
-
-		std::vector<VkLayerProperties> available_layers(available_layer_count);
-		vkEnumerateInstanceLayerProperties(&available_layer_count, available_layers.data());
-
-		std::vector<const char*> layers;
-		auto try_add_layer = [&](const char* layer) {
-			for (const auto& props : available_layers) {
-				if (strcmp(layer, props.layerName) == 0) {
-					layers.emplace_back(layer);
-					return true;
-				}
-			}
-
-			return false;
-		};
-
-		bool validation_layer_enabled = try_add_layer("VK_LAYER_KHRONOS_validation");
-		if (!validation_layer_enabled) {
-			tlog::warning() << "Vulkan validation layer is not available. Vulkan errors will be difficult to diagnose.";
-		}
-
-		instance_create_info.enabledLayerCount = static_cast<uint32_t>(layers.size());
-		instance_create_info.ppEnabledLayerNames = layers.empty() ? nullptr : layers.data();
-
 		std::vector<const char*> instance_extensions;
 		std::vector<const char*> device_extensions;
 
@@ -172,21 +202,32 @@ public:
 		instance_extensions.emplace_back(VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME);
 		instance_extensions.emplace_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
 
-		if (validation_layer_enabled) {
+		auto supported_instance_layers = vk_supported_instance_layers();
+
+		const char* validation_layer_name = "VK_LAYER_KHRONOS_validation";
+		bool instance_validation_layer_enabled = supported_instance_layers.count(validation_layer_name) > 0;
+		if (!instance_validation_layer_enabled) {
+			tlog::warning() << "Vulkan instance validation layer is not available. Vulkan errors will be difficult to diagnose.";
+		}
+
+		std::vector<const char*> instance_layers;
+		if (instance_validation_layer_enabled) {
+			instance_layers.emplace_back(validation_layer_name);
+		}
+
+		instance_create_info.enabledLayerCount = static_cast<uint32_t>(instance_layers.size());
+		instance_create_info.ppEnabledLayerNames = instance_layers.empty() ? nullptr : instance_layers.data();
+
+		if (instance_validation_layer_enabled) {
 			instance_extensions.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 		}
 
-		for (uint32_t i = 0; i < n_ngx_device_extensions; ++i) {
-			device_extensions.emplace_back(ngx_device_extensions[i]);
+		auto supported_instance_extensions = vk_supported_instance_extensions(nullptr);
+		for (const auto& e : instance_extensions) {
+			if (supported_instance_extensions.count(e) == 0) {
+				throw std::runtime_error{fmt::format("Required instance extension '{}' is not supported.", e)};
+			}
 		}
-
-		device_extensions.emplace_back(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME);
-	#ifdef _WIN32
-		device_extensions.emplace_back(VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME);
-	#else
-		device_extensions.emplace_back(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
-	#endif
-		device_extensions.emplace_back(VK_KHR_DEVICE_GROUP_EXTENSION_NAME);
 
 		instance_create_info.enabledExtensionCount = (uint32_t)instance_extensions.size();
 		instance_create_info.ppEnabledExtensionNames = instance_extensions.data();
@@ -198,13 +239,13 @@ public:
 		debug_messenger_create_info.pfnUserCallback = vk_debug_callback;
 		debug_messenger_create_info.pUserData = nullptr;
 
-		if (validation_layer_enabled) {
+		if (instance_validation_layer_enabled) {
 			instance_create_info.pNext = &debug_messenger_create_info;
 		}
 
 		VK_CHECK_THROW(vkCreateInstance(&instance_create_info, nullptr, &m_vk_instance));
 
-		if (validation_layer_enabled) {
+		if (instance_validation_layer_enabled) {
 			auto CreateDebugUtilsMessengerEXT = [](VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger) {
 				auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
 				if (func != nullptr) {
@@ -302,6 +343,25 @@ public:
 			throw std::runtime_error{"Failed to find Vulkan device corresponding to CUDA device."};
 		}
 
+		for (uint32_t i = 0; i < n_ngx_device_extensions; ++i) {
+			device_extensions.emplace_back(ngx_device_extensions[i]);
+		}
+
+		device_extensions.emplace_back(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME);
+#ifdef _WIN32
+		device_extensions.emplace_back(VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME);
+#else
+		device_extensions.emplace_back(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
+#endif
+		device_extensions.emplace_back(VK_KHR_DEVICE_GROUP_EXTENSION_NAME);
+
+		auto supported_device_extensions = vk_supported_device_extensions(m_vk_physical_device, nullptr);
+		for (const auto& e : device_extensions) {
+			if (supported_device_extensions.count(e) == 0) {
+				throw std::runtime_error{fmt::format("Required device extension '{}' is not supported.", e)};
+			}
+		}
+
 		// -------------------------------
 		// Vulkan Logical Device
 		// -------------------------------
@@ -328,17 +388,15 @@ public:
 		device_create_info.pEnabledFeatures = &device_features;
 		device_create_info.enabledExtensionCount = (uint32_t)device_extensions.size();
 		device_create_info.ppEnabledExtensionNames = device_extensions.data();
-		device_create_info.enabledLayerCount = static_cast<uint32_t>(layers.size());
-		device_create_info.ppEnabledLayerNames = layers.data();
 
-	#ifdef VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
+#ifdef VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
 		VkPhysicalDeviceBufferDeviceAddressFeaturesEXT buffer_device_address_feature = {};
 		buffer_device_address_feature.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_EXT;
 		buffer_device_address_feature.bufferDeviceAddress = VK_TRUE;
 		device_create_info.pNext = &buffer_device_address_feature;
-	#else
+#else
 		throw std::runtime_error{"Buffer device address extension not available."};
-	#endif
+#endif
 
 		VK_CHECK_THROW(vkCreateDevice(m_vk_physical_device, &device_create_info, nullptr, &m_vk_device));
 
@@ -525,7 +583,7 @@ public:
 		return allocated_bytes;
 	}
 
-	std::unique_ptr<IDlss> init_dlss(const Eigen::Vector2i& out_resolution) override;
+	std::unique_ptr<IDlss> init_dlss(const ivec2& out_resolution) override;
 
 private:
 	VkInstance m_vk_instance = VK_NULL_HANDLE;
@@ -545,12 +603,14 @@ std::shared_ptr<IDlssProvider> init_vulkan_and_ngx() {
 
 class VulkanTexture {
 public:
-	VulkanTexture(std::shared_ptr<VulkanAndNgx> vk, const Vector2i& size, uint32_t n_channels) : m_vk{vk}, m_size{size}, m_n_channels{n_channels} {
+	VulkanTexture(std::shared_ptr<VulkanAndNgx> vk, const ivec2& size, uint32_t n_channels) : m_vk{vk}, m_size{size}, m_n_channels{n_channels} {
+		ScopeGuard cleanup_guard{[&]() { clear(); }};
+
 		VkImageCreateInfo image_info{};
 		image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 		image_info.imageType = VK_IMAGE_TYPE_2D;
-		image_info.extent.width = static_cast<uint32_t>(m_size.x());
-		image_info.extent.height = static_cast<uint32_t>(m_size.y());
+		image_info.extent.width = static_cast<uint32_t>(m_size.x);
+		image_info.extent.height = static_cast<uint32_t>(m_size.y);
 		image_info.extent.depth = 1;
 		image_info.mipLevels = 1;
 		image_info.arrayLayers = 1;
@@ -641,7 +701,7 @@ public:
 		VK_CHECK_THROW(vkCreateImageView(m_vk->vk_device(), &view_info, nullptr, &m_vk_image_view));
 
 		// Map to NGX
-		m_ngx_resource = NVSDK_NGX_Create_ImageView_Resource_VK(m_vk_image_view, m_vk_image, view_info.subresourceRange, image_info.format, m_size.x(), m_size.y(), true);
+		m_ngx_resource = NVSDK_NGX_Create_ImageView_Resource_VK(m_vk_image_view, m_vk_image, view_info.subresourceRange, image_info.format, m_size.x, m_size.y, true);
 
 		// Map to CUDA memory: VkDeviceMemory->FD/HANDLE->cudaExternalMemory->CUDA pointer
 #ifdef _WIN32
@@ -707,8 +767,8 @@ public:
 		}
 
 		cudaExtent extent = {};
-		extent.width = m_size.x();
-		extent.height = m_size.y();
+		extent.width = m_size.x;
+		extent.height = m_size.y;
 		extent.depth = 0;
 
 		external_memory_mipmapped_array_desc.offset = 0;
@@ -731,37 +791,50 @@ public:
 
 		m_n_bytes = mem_requirements.size;
 		g_total_n_bytes_allocated += m_n_bytes;
+
+		cleanup_guard.disarm();
 	}
 
 	virtual ~VulkanTexture() {
+		clear();
+	}
+
+	void clear() {
 		g_total_n_bytes_allocated -= m_n_bytes;
 
 		if (m_cuda_data) {
 			cudaFree(m_cuda_data);
+			m_cuda_data = nullptr;
 		}
 
 		if (m_cuda_surface_object) {
 			cudaDestroySurfaceObject(m_cuda_surface_object);
+			m_cuda_surface_object = {};
 		}
 
 		if (m_cuda_mipmapped_array) {
 			cudaFreeMipmappedArray(m_cuda_mipmapped_array);
+			m_cuda_mipmapped_array = {};
 		}
 
 		if (m_cuda_external_memory) {
 			cudaDestroyExternalMemory(m_cuda_external_memory);
+			m_cuda_external_memory = {};
 		}
 
 		if (m_vk_image_view) {
 			vkDestroyImageView(m_vk->vk_device(), m_vk_image_view, nullptr);
+			m_vk_image_view = {};
 		}
 
 		if (m_vk_image) {
 			vkDestroyImage(m_vk->vk_device(), m_vk_image, nullptr);
+			m_vk_image = {};
 		}
 
 		if (m_vk_device_memory) {
 			vkFreeMemory(m_vk->vk_device(), m_vk_device_memory, nullptr);
+			m_vk_device_memory = {};
 		}
 	}
 
@@ -778,17 +851,17 @@ public:
 	}
 
 	size_t bytes() const {
-		return m_size.x() * (size_t)m_size.y() * sizeof(float) * m_n_channels;
+		return m_size.x * (size_t)m_size.y * sizeof(float) * m_n_channels;
 	}
 
-	Vector2i size() const {
+	ivec2 size() const {
 		return m_size;
 	}
 
 private:
 	std::shared_ptr<VulkanAndNgx> m_vk;
 
-	Vector2i m_size;
+	ivec2 m_size;
 	uint32_t m_n_channels;
 
 	size_t m_n_bytes = 0;
@@ -800,7 +873,7 @@ private:
 	cudaExternalMemory_t m_cuda_external_memory = {};
 	cudaMipmappedArray_t m_cuda_mipmapped_array = {};
 	cudaSurfaceObject_t m_cuda_surface_object = {};
-	float* m_cuda_data;
+	float* m_cuda_data = nullptr;
 
 	NVSDK_NGX_Resource_VK m_ngx_resource = {};
 };
@@ -818,40 +891,40 @@ NVSDK_NGX_PerfQuality_Value ngx_dlss_quality(EDlssQuality quality) {
 
 struct DlssFeatureSpecs {
 	EDlssQuality quality;
-	Vector2i out_resolution;
-	Vector2i optimal_in_resolution;
-	Vector2i min_in_resolution;
-	Vector2i max_in_resolution;
+	ivec2 out_resolution;
+	ivec2 optimal_in_resolution;
+	ivec2 min_in_resolution;
+	ivec2 max_in_resolution;
 	float optimal_sharpness;
 
-	float distance(const Vector2i& resolution) const {
-		return (min_in_resolution - resolution).cwiseMax(resolution - max_in_resolution).cwiseMax(0).cast<float>().norm();
+	float distance(const ivec2& resolution) const {
+		return length(vec2(max(max(min_in_resolution - resolution, resolution - max_in_resolution), ivec2(0))));
 	}
 
-	Vector2i clamp_resolution(const Vector2i& resolution) const {
-		return resolution.cwiseMax(min_in_resolution).cwiseMin(max_in_resolution);
+	ivec2 clamp_resolution(const ivec2& resolution) const {
+		return clamp(resolution, min_in_resolution, max_in_resolution);
 	}
 };
 
-DlssFeatureSpecs dlss_feature_specs(NVSDK_NGX_Parameter* ngx_parameters, const Eigen::Vector2i& out_resolution, EDlssQuality quality) {
+DlssFeatureSpecs dlss_feature_specs(NVSDK_NGX_Parameter* ngx_parameters, const ivec2& out_resolution, EDlssQuality quality) {
 	DlssFeatureSpecs specs;
 	specs.quality = quality;
 	specs.out_resolution = out_resolution;
 
 	NGX_CHECK_THROW(NGX_DLSS_GET_OPTIMAL_SETTINGS(
 		ngx_parameters,
-		specs.out_resolution.x(), specs.out_resolution.y(),
+		specs.out_resolution.x, specs.out_resolution.y,
 		ngx_dlss_quality(quality),
-		(uint32_t*)&specs.optimal_in_resolution.x(), (uint32_t*)&specs.optimal_in_resolution.y(),
-		(uint32_t*)&specs.max_in_resolution.x(), (uint32_t*)&specs.max_in_resolution.y(),
-		(uint32_t*)&specs.min_in_resolution.x(), (uint32_t*)&specs.min_in_resolution.y(),
+		(uint32_t*)&specs.optimal_in_resolution.x, (uint32_t*)&specs.optimal_in_resolution.y,
+		(uint32_t*)&specs.max_in_resolution.x, (uint32_t*)&specs.max_in_resolution.y,
+		(uint32_t*)&specs.min_in_resolution.x, (uint32_t*)&specs.min_in_resolution.y,
 		&specs.optimal_sharpness
 	));
 
 	// Don't permit input resolutions larger than the output. (Just in case DLSS allows it.)
-	specs.optimal_in_resolution = specs.optimal_in_resolution.cwiseMin(out_resolution);
-	specs.max_in_resolution = specs.max_in_resolution.cwiseMin(out_resolution);
-	specs.min_in_resolution = specs.min_in_resolution.cwiseMin(out_resolution);
+	specs.optimal_in_resolution = min(specs.optimal_in_resolution, out_resolution);
+	specs.max_in_resolution = min(specs.max_in_resolution, out_resolution);
+	specs.min_in_resolution = min(specs.min_in_resolution, out_resolution);
 
 	return specs;
 }
@@ -875,10 +948,10 @@ public:
 
 		memset(&dlss_create_params, 0, sizeof(dlss_create_params));
 
-		dlss_create_params.Feature.InWidth = m_specs.optimal_in_resolution.x();
-		dlss_create_params.Feature.InHeight = m_specs.optimal_in_resolution.y();
-		dlss_create_params.Feature.InTargetWidth = m_specs.out_resolution.x();
-		dlss_create_params.Feature.InTargetHeight = m_specs.out_resolution.y();
+		dlss_create_params.Feature.InWidth = m_specs.optimal_in_resolution.x;
+		dlss_create_params.Feature.InHeight = m_specs.optimal_in_resolution.y;
+		dlss_create_params.Feature.InTargetWidth = m_specs.out_resolution.x;
+		dlss_create_params.Feature.InTargetHeight = m_specs.out_resolution.y;
 		dlss_create_params.Feature.InPerfQualityValue = ngx_dlss_quality(m_specs.quality);
 		dlss_create_params.InFeatureCreateFlags = dlss_create_feature_flags;
 
@@ -890,7 +963,7 @@ public:
 		}
 	}
 
-	DlssFeature(std::shared_ptr<VulkanAndNgx> vk_and_ngx, const Eigen::Vector2i& out_resolution, bool is_hdr, bool sharpen, EDlssQuality quality)
+	DlssFeature(std::shared_ptr<VulkanAndNgx> vk_and_ngx, const ivec2& out_resolution, bool is_hdr, bool sharpen, EDlssQuality quality)
 	: DlssFeature{vk_and_ngx, dlss_feature_specs(vk_and_ngx->ngx_parameters(), out_resolution, quality), is_hdr, sharpen} {}
 
 	~DlssFeature() {
@@ -904,8 +977,8 @@ public:
 	}
 
 	void run(
-		const Vector2i& in_resolution,
-		const Vector2f& jitter_offset,
+		const ivec2& in_resolution,
+		const vec2& jitter_offset,
 		float sharpening,
 		bool shall_reset,
 		NVSDK_NGX_Resource_VK& frame,
@@ -928,13 +1001,13 @@ public:
 		dlss_params.pInDepth = &depth;
 		dlss_params.pInMotionVectors = &mvec;
 		dlss_params.pInExposureTexture = &exposure;
-		dlss_params.InJitterOffsetX = jitter_offset.x();
-		dlss_params.InJitterOffsetY = jitter_offset.y();
+		dlss_params.InJitterOffsetX = jitter_offset.x;
+		dlss_params.InJitterOffsetY = jitter_offset.y;
 		dlss_params.Feature.InSharpness = sharpening;
 		dlss_params.InReset = shall_reset;
 		dlss_params.InMVScaleX = 1.0f;
 		dlss_params.InMVScaleY = 1.0f;
-		dlss_params.InRenderSubrectDimensions = {(uint32_t)in_resolution.x(), (uint32_t)in_resolution.y()};
+		dlss_params.InRenderSubrectDimensions = {(uint32_t)in_resolution.x, (uint32_t)in_resolution.y};
 
 		NGX_CHECK_THROW(NGX_VULKAN_EVALUATE_DLSS_EXT(m_vk_and_ngx->vk_command_buffer(), m_ngx_dlss, m_vk_and_ngx->ngx_parameters(), &dlss_params));
 
@@ -953,15 +1026,15 @@ public:
 		return m_specs.quality;
 	}
 
-	Vector2i out_resolution() const {
+	ivec2 out_resolution() const {
 		return m_specs.out_resolution;
 	}
 
-	Vector2i clamp_resolution(const Vector2i& resolution) const {
+	ivec2 clamp_resolution(const ivec2& resolution) const {
 		return m_specs.clamp_resolution(resolution);
 	}
 
-	Vector2i optimal_in_resolution() const {
+	ivec2 optimal_in_resolution() const {
 		return m_specs.optimal_in_resolution;
 	}
 
@@ -976,7 +1049,7 @@ private:
 
 class Dlss : public IDlss {
 public:
-	Dlss(std::shared_ptr<VulkanAndNgx> vk_and_ngx, const Eigen::Vector2i& max_out_resolution)
+	Dlss(std::shared_ptr<VulkanAndNgx> vk_and_ngx, const ivec2& max_out_resolution)
 	:
 	m_vk_and_ngx{vk_and_ngx},
 	m_max_out_resolution{max_out_resolution},
@@ -1005,7 +1078,7 @@ public:
 
 		// For super insane performance requirements (more than 3x upscaling) try UltraPerformance
 		// with reduced output resolutions for 4.5x, 6x, 9x.
-		std::vector<Vector2i> reduced_out_resolutions = {
+		std::vector<ivec2> reduced_out_resolutions = {
 			max_out_resolution / 3 * 2,
 			max_out_resolution / 2,
 			max_out_resolution / 3,
@@ -1031,7 +1104,7 @@ public:
 		m_dlss_feature = nullptr;
 	}
 
-	void update_feature(const Vector2i& in_resolution, bool is_hdr, bool sharpen) override {
+	void update_feature(const ivec2& in_resolution, bool is_hdr, bool sharpen) override {
 		CUDA_CHECK_THROW(cudaDeviceSynchronize());
 
 		DlssFeatureSpecs specs;
@@ -1053,10 +1126,10 @@ public:
 	}
 
 	void run(
-		const Vector2i& in_resolution,
+		const ivec2& in_resolution,
 		bool is_hdr,
 		float sharpening,
-		const Vector2f& jitter_offset,
+		const vec2& jitter_offset,
 		bool shall_reset
 	) override {
 		CUDA_CHECK_THROW(cudaDeviceSynchronize());
@@ -1096,7 +1169,7 @@ public:
 		return m_output_buffer.surface();
 	}
 
-	Vector2i clamp_resolution(const Vector2i& resolution) const {
+	ivec2 clamp_resolution(const ivec2& resolution) const {
 		float min_distance = std::numeric_limits<float>::infinity();
 		DlssFeatureSpecs min_distance_specs = {};
 		for (const auto& specs : m_dlss_specs) {
@@ -1110,11 +1183,11 @@ public:
 		return min_distance_specs.clamp_resolution(resolution);
 	}
 
-	Vector2i out_resolution() const override {
+	ivec2 out_resolution() const override {
 		return m_dlss_feature ? m_dlss_feature->out_resolution() : m_max_out_resolution;
 	}
 
-	Vector2i max_out_resolution() const override {
+	ivec2 max_out_resolution() const override {
 		return m_max_out_resolution;
 	}
 
@@ -1142,10 +1215,10 @@ private:
 	VulkanTexture m_exposure_buffer;
 	VulkanTexture m_output_buffer;
 
-	Vector2i m_max_out_resolution;
+	ivec2 m_max_out_resolution;
 };
 
-std::unique_ptr<IDlss> VulkanAndNgx::init_dlss(const Eigen::Vector2i& out_resolution) {
+std::unique_ptr<IDlss> VulkanAndNgx::init_dlss(const ivec2& out_resolution) {
 	return std::make_unique<Dlss>(shared_from_this(), out_resolution);
 }
 
